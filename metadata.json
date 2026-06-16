@@ -1,0 +1,6 @@
+{
+  "name": "Haider Brothers Traders",
+  "description": "Premium 24/7 tire service, sales, alignment, and repair in Faisal Town, Block C 1, Lahore, Pakistan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

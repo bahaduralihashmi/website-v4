@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety net default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened helper functions for static verification (denial of wallet guard)
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // High fidelity schema assertion helper for Tire Products
+    function isValidTireProduct(data) {
+      return data.keys().hasAll(['id', 'name', 'brand', 'size', 'feature', 'price', 'badge', 'segment', 'image', 'description'])
+          && data.keys().size() == 10
+          && data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 128
+          && data.brand is string && data.brand.size() <= 128
+          && data.size is string && data.size.size() <= 64
+          && data.feature is string && data.feature.size() <= 256
+          && (data.price is int || data.price is float) && data.price >= 0
+          && data.badge is string && data.badge.size() <= 128
+          && data.segment is string && (data.segment == 'hot' || data.segment == 'new' || data.segment == 'famous')
+          && data.image is string && data.image.size() <= 1024
+          && data.description is string && data.description.size() <= 4096;
+    }
+
+    // Modern High fidelity schema helper for the requested "products" collection
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() <= 128
+          && data.brand is string && data.brand.size() <= 128
+          && data.size is string && data.size.size() <= 64
+          && (data.price is int || data.price is float) && data.price >= 0
+          && data.category is string && (data.category == 'hot-selling' || data.category == 'new-brands' || data.category == 'famous')
+          && (data.stock is int || data.stock is float) && data.stock >= 0
+          && data.feature is string && data.feature.size() <= 256
+          && data.imageUrl is string && data.imageUrl.size() <= 1024;
+    }
+
+    // High fidelity schema assertion helper for User Testimonials
+    function isValidUserReview(data) {
+      return data.keys().hasAll(['name', 'rating', 'text', 'date', 'initials'])
+          && data.keys().size() == 5
+          && data.name is string && data.name.size() <= 128
+          && data.rating is int && data.rating >= 1 && data.rating <= 5
+          && data.text is string && data.text.size() <= 4096
+          && data.date is string && data.date.size() <= 128
+          && data.initials is string && data.initials.size() <= 16;
+    }
+
+    // High fidelity schema assertion helper for Visitor Analytics
+    function isValidVisitorLog(data) {
+      return data.keys().hasAll(['sessionId', 'userAgent', 'platform', 'language', 'pagePath', 'timestamp'])
+          && data.keys().size() == 6
+          && data.sessionId is string && data.sessionId.size() <= 256
+          && data.userAgent is string && data.userAgent.size() <= 1024
+          && data.platform is string && data.platform.size() <= 128
+          && data.language is string && data.language.size() <= 64
+          && data.pagePath is string && data.pagePath.size() <= 256
+          && data.timestamp is timestamp && data.timestamp == request.time;
+    }
+
+    // High fidelity schema assertion helper for Newsletter Subscribers
+    function isValidSubscriber(data) {
+      return data.keys().hasAll(['email', 'createdAt'])
+          && data.keys().size() == 2
+          && data.email is string && data.email.size() <= 256 && data.email.matches('^[^@]+@[^@]+\\.[^@]+$')
+          && data.createdAt is timestamp && data.createdAt == request.time;
+    }
+
+    // Hardened constraints for the /products/ collection (Public read, authenticated write or seed prefix)
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if (request.auth != null || productId.startsWith('seed-')) && isValidId(productId) && isValidProduct(incoming());
+      allow update: if request.auth != null && isValidId(productId) && isValidProduct(incoming());
+      allow delete: if request.auth != null && isValidId(productId);
+    }
+
+    // Allow public read on the system connectivity check path
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Hardened constraints for the /tyres/ collection
+    match /tyres/{tyreId} {
+      allow read: if true;
+      allow create, update: if isValidId(tyreId) && isValidTireProduct(incoming());
+      allow delete: if isValidId(tyreId);
+    }
+
+    // Hardened constraints for the /reviews/ collection
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isValidId(reviewId) && isValidUserReview(incoming());
+      allow update, delete: if false; // Reviews are write-once append-only
+    }
+
+    // Hardened constraints for the /visitors/ collection
+    match /visitors/{visitorId} {
+      allow read: if request.auth != null; // Admin-only read for visitor stats
+      allow create: if isValidId(visitorId) && isValidVisitorLog(incoming());
+      allow update, delete: if false; // Visitor logs are immutable
+    }
+
+    // Hardened constraints for the /subscribers/ collection (Public sign up, Admin-only read)
+    match /subscribers/{subscriberId} {
+      allow read: if request.auth != null; // Admin can view mailing list
+      allow create: if isValidId(subscriberId) && isValidSubscriber(incoming());
+      allow update, delete: if false; // Newsletter entries are append-only/immutable
+    }
+  }
+}

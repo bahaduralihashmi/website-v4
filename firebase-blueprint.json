@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Premium tire configuration parameters and live branch inventory metrics",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Auto-generated document identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full tire model name"
+        },
+        "brand": {
+          "type": "string",
+          "description": "Tyre manufacturer / brand name"
+        },
+        "size": {
+          "type": "string",
+          "description": "Tyre size specification code"
+        },
+        "price": {
+          "type": "number",
+          "description": "Dealer wholesale price in PKR"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["hot-selling", "new-brands", "famous"],
+          "description": "Segment classification category"
+        },
+        "stock": {
+          "type": "number",
+          "description": "Live stock quantity level currently available at Faisal Town Lahore showroom"
+        },
+        "feature": {
+          "type": "string",
+          "description": "Primary highlight tire characteristic"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Absolute URL path to tire product showcase image file"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp indicating document creation time"
+        }
+      },
+      "required": ["name", "brand", "size", "price", "category", "stock"]
+    },
+    "VisitorLog": {
+      "title": "VisitorLog",
+      "description": "Log of user visitor analytics for tracking store traffic and engagement",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Auto-generated document identifier"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Unique session identifier for the visitor"
+        },
+        "userAgent": {
+          "type": "string",
+          "description": "Visitor browser metadata"
+        },
+        "platform": {
+          "type": "string",
+          "description": "OS platform of the visitor"
+        },
+        "language": {
+          "type": "string",
+          "description": "Browser default language"
+        },
+        "pagePath": {
+          "type": "string",
+          "description": "Specific route or section visited"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["sessionId", "timestamp"]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Newsletter subscriber email record for sending seasonal maintenance tips",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Auto-generated document identifier"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the newsletter subscriber"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Subscription timestamp"
+        }
+      },
+      "required": ["email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Unified main retail/wholesale tire product collection"
+    },
+    "visitors/{visitorId}": {
+      "schema": "VisitorLog",
+      "description": "Collection storing website visitation events"
+    },
+    "subscribers/{subscriberId}": {
+      "schema": "NewsletterSubscriber",
+      "description": "Collection of customer newsletter recipient subscriber emails"
+    }
+  }
+}

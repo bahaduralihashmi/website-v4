@@ -33,3 +33,7 @@ saved_model/**/* filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.zst filter=lfs diff=lfs merge=lfs -text
 *tfevents* filter=lfs diff=lfs merge=lfs -text
+src/assets/images/comfort_tire_1781509452553.jpg filter=lfs diff=lfs merge=lfs -text
+src/assets/images/sport_tire_1781509490802.jpg filter=lfs diff=lfs merge=lfs -text
+src/assets/images/suv_tire_1781509472580.jpg filter=lfs diff=lfs merge=lfs -text
+src/assets/images/winter_tire_1781509513584.jpg filter=lfs diff=lfs merge=lfs -text
