@@ -1,0 +1,39 @@
+type Product @table {
+  name: String!
+  brand: String!
+  price: Float!
+  stockStatus: String!
+  imageUrl: String
+  specs: String
+}
+
+type Service @table {
+  title: String!
+  basePrice: Float!
+  description: String
+}
+
+type Customer @table {
+  name: String!
+  phoneNumber: String!
+  vehicleDetails: String
+}
+
+type Appointment @table {
+  customerName: String!
+  phoneNumber: String!
+  requestedDate: Timestamp!
+  status: String!
+  vehicleModel: String
+  notes: String
+  service: Service
+  customer: Customer
+}
+
+type ShopInfo @table {
+  shopName: String!
+  address: String!
+  openingHours: String!
+  contactNumber: String
+  googleMapsLink: String
+}

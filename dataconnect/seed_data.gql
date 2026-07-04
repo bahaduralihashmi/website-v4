@@ -1,0 +1,44 @@
+mutation SeedData @transaction {
+  customer_insertMany(data: [
+    {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      name: "Alice Smith",
+      phoneNumber: "555-0101"
+    },
+    {
+      id: "550e8400-e29b-41d4-a716-446655440002",
+      name: "Bob Jones",
+      phoneNumber: "555-0102"
+    }
+  ])
+  service_insertMany(data: [
+    {
+      id: "660e8400-e29b-41d4-a716-446655440001",
+      title: "Oil Change",
+      basePrice: 50.0
+    },
+    {
+      id: "660e8400-e29b-41d4-a716-446655440002",
+      title: "Tire Rotation",
+      basePrice: 30.0
+    }
+  ])
+  appointment_insertMany(data: [
+    {
+      customerName: "Alice Smith",
+      phoneNumber: "555-0101",
+      requestedDate: "2024-12-01T10:00:00Z",
+      status: "scheduled",
+      customerId: "550e8400-e29b-41d4-a716-446655440001",
+      serviceId: "660e8400-e29b-41d4-a716-446655440001"
+    },
+    {
+      customerName: "Bob Jones",
+      phoneNumber: "555-0102",
+      requestedDate: "2024-12-02T14:00:00Z",
+      status: "scheduled",
+      customerId: "550e8400-e29b-41d4-a716-446655440002",
+      serviceId: "660e8400-e29b-41d4-a716-446655440002"
+    }
+  ])
+}

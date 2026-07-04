@@ -1,0 +1,24 @@
+mutation CreateAppointment($data: Appointment_Data!) @auth(level: USER) {
+  appointment_insert(data: $data)
+}
+
+query ListAllAppointments @auth(level: USER) {
+  appointments {
+    id
+    customerName
+    phoneNumber
+    requestedDate
+    status
+    service {
+      title
+    }
+  }
+}
+
+mutation UpdateAppointmentStatus($id: UUID!, $status: String!) @auth(level: USER) {
+  appointment_update(key: {id: $id}, data: {status: $status})
+}
+
+mutation DeleteAppointment($id: UUID!) @auth(level: USER) {
+  appointment_delete(key: {id: $id})
+}

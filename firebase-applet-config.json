@@ -1,10 +1,9 @@
 {
-  "projectId": "gen-lang-client-0073278154",
-  "appId": "1:439857597926:web:83652c75dc57d7059e9a27",
-  "apiKey": "AIzaSyBpSkNWbpSUtiOwhbo30Xhx_K8OU9ClT2U",
-  "authDomain": "gen-lang-client-0073278154.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-b18648e1-f7e5-49af-8c1a-a41fa7ba6ce2",
-  "storageBucket": "gen-lang-client-0073278154.firebasestorage.app",
-  "messagingSenderId": "439857597926",
-  "measurementId": ""
+  "apiKey": "AIzaSyCV6qVRjfwWmcL0owcbCpxjoFTVmqriFnY",
+  "authDomain": "haider-brothers-traders.firebaseapp.com",
+  "projectId": "haider-brothers-traders",
+  "storageBucket": "haider-brothers-traders.firebasestorage.app",
+  "messagingSenderId": "391456694351",
+  "appId": "1:391456694351:web:3d1f3cea7791d50ecf4a3a",
+  "measurementId": "G-7NGLPQWK7Z"
 }
