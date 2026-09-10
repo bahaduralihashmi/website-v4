@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   MessageSquare,
   PackageSearch,
+  Building2,
 } from "lucide-react";
 import type { TireProduct } from "../data";
 import {
@@ -24,6 +25,8 @@ import {
 const CART_KEY = "hbt-cart-v1";
 const DELIVERY_CHARGE = 500;
 const WHATSAPP_NUMBER = "923034572298";
+const MCB_ACCOUNT = "1581298881001800";
+const MCB_BANK = "MCB Bank";
 
 type StoreEventDetail = { tire: TireProduct };
 type OrderSnapshot = {
@@ -53,6 +56,7 @@ function saveCart(items: CartItem[]) {
 function paymentLabel(method: PaymentMethod) {
   if (method === "cod") return "Cash on Delivery";
   if (method === "bilty") return "Pay on Bilty Received";
+  if (method === "bank") return "MCB Bank Transfer";
   return "Card / Online Payment";
 }
 
@@ -64,6 +68,7 @@ export default function EcommerceStore() {
   const [submitting, setSubmitting] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
   const [tracking, setTracking] = useState("");
+  const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const [form, setForm] = useState<CustomerDetails>({
     name: "",
     phone: "",
@@ -77,16 +82,13 @@ export default function EcommerceStore() {
 
   useEffect(() => {
     setCart(readCart());
-
     const addHandler = (event: Event) => {
       const detail = (event as CustomEvent<StoreEventDetail>).detail;
       if (!detail?.tire) return;
-
       const tire = detail.tire;
       const existing = readCart();
       const stock = Math.max(1, Number(tire.stock) || 99);
       const found = existing.find((item) => item.id === tire.id);
-
       const next = found
         ? existing.map((item) =>
             item.id === tire.id
@@ -105,16 +107,13 @@ export default function EcommerceStore() {
               image: tire.image,
             },
           ];
-
       saveCart(next);
       setCart(next);
       setOpen(true);
     };
-
     const updateHandler = () => setCart(readCart());
     window.addEventListener("hbt-add-to-cart", addHandler);
     window.addEventListener("hbt-cart-updated", updateHandler);
-
     return () => {
       window.removeEventListener("hbt-add-to-cart", addHandler);
       window.removeEventListener("hbt-cart-updated", updateHandler);
@@ -130,9 +129,7 @@ export default function EcommerceStore() {
 
   const changeQty = (id: string, delta: number) => {
     const next = cart.map((item) =>
-      item.id === id
-        ? { ...item, quantity: Math.max(1, item.quantity + delta) }
-        : item,
+      item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item,
     );
     saveCart(next);
     setCart(next);
@@ -144,13 +141,12 @@ export default function EcommerceStore() {
     setCart(next);
   };
 
-  const buildWhatsAppUrl = (order: OrderSnapshot) => {
+  const buildWhatsAppMessage = (order: OrderSnapshot) => {
     const lines = order.items.map(
       (item) =>
         `• ${item.brand} ${item.name} | ${item.size} × ${item.quantity} = PKR ${(Number(item.price) * item.quantity).toLocaleString()}`,
     );
-
-    const message = [
+    return [
       "🛒 NEW HBT ONLINE ORDER",
       `Order: ${order.orderId}`,
       `Customer: ${order.customer.name}`,
@@ -167,13 +163,33 @@ export default function EcommerceStore() {
       `Delivery: PKR ${order.deliveryCharge.toLocaleString()} (paid by buyer)`,
       `TOTAL: PKR ${order.total.toLocaleString()}`,
       `Payment: ${paymentLabel(order.paymentMethod)}`,
-      `Payment status: ${order.paymentMethod === "card" ? "Pending online payment" : "Pending"}`,
+      `Payment status: Pending`,
+      order.paymentMethod === "bank" ? `MCB Account: ${MCB_ACCOUNT}` : "",
       order.customer.notes ? `Notes: ${order.customer.notes}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    ].filter(Boolean).join("\n");
+  };
 
-    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  const buildWhatsAppUrl = (order: OrderSnapshot) =>
+    `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildWhatsAppMessage(order))}`;
+
+  const sendOrderToWhatsApp = async (order: OrderSnapshot) => {
+    setWhatsappStatus("sending");
+    try {
+      const response = await fetch("/api/whatsapp-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order,
+          message: buildWhatsAppMessage(order),
+          recipient: WHATSAPP_NUMBER,
+        }),
+      });
+      if (!response.ok) throw new Error(`WhatsApp API returned ${response.status}`);
+      setWhatsappStatus("sent");
+    } catch (error) {
+      console.error("Automatic WhatsApp notification failed", error);
+      setWhatsappStatus("failed");
+    }
   };
 
   const placeOrder = async () => {
@@ -184,11 +200,10 @@ export default function EcommerceStore() {
       !form.city.trim() ||
       !form.address.trim() ||
       !cart.length
-    ) {
-      return;
-    }
+    ) return;
 
     setSubmitting(true);
+    setWhatsappStatus("idle");
     const orderId = generateOrderId();
     const snapshot: OrderSnapshot = {
       orderId,
@@ -214,7 +229,6 @@ export default function EcommerceStore() {
         courier: "pending",
         trackingNumber: null,
       });
-
       localStorage.setItem("hbt-last-order", JSON.stringify(snapshot));
       saveCart([]);
       setCart([]);
@@ -222,40 +236,26 @@ export default function EcommerceStore() {
       setSuccess(snapshot);
       setOpen(true);
       setTracking("");
+      void sendOrderToWhatsApp(snapshot);
     } catch (error) {
       console.error("Order creation failed", error);
-      alert(
-        "We could not save your order. Please try again or contact HBT on WhatsApp.",
-      );
+      alert("We could not save your order. Please try again or contact HBT on WhatsApp.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const inputFields = [
-    "name",
-    "phone",
-    "whatsapp",
-    "email",
-    "city",
-    "address",
-    "landmark",
-    "notes",
-  ] as const;
-
-  const placeholderFor = (key: (typeof inputFields)[number]) => {
-    const labels: Record<(typeof inputFields)[number], string> = {
-      name: "Full name *",
-      phone: "Mobile number *",
-      whatsapp: "WhatsApp number *",
-      email: "Email (optional)",
-      city: "City *",
-      address: "Complete delivery address *",
-      landmark: "Landmark (optional)",
-      notes: "Order notes (optional)",
-    };
-    return labels[key];
-  };
+  const inputFields = ["name", "phone", "whatsapp", "email", "city", "address", "landmark", "notes"] as const;
+  const placeholderFor = (key: (typeof inputFields)[number]) => ({
+    name: "Full name *",
+    phone: "Mobile number *",
+    whatsapp: "WhatsApp number *",
+    email: "Email (optional)",
+    city: "City *",
+    address: "Complete delivery address *",
+    landmark: "Landmark (optional)",
+    notes: "Order notes (optional)",
+  })[key];
 
   return (
     <>
@@ -265,42 +265,18 @@ export default function EcommerceStore() {
         aria-label={`Open shopping cart, ${count} items`}
       >
         <ShoppingCart className="w-6 h-6" />
-        {count > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-6 h-6 px-1 rounded-full bg-red-600 border-2 border-white text-white text-[11px] font-black flex items-center justify-center">
-            {count}
-          </span>
-        )}
+        {count > 0 && <span className="absolute -top-1 -right-1 min-w-6 h-6 px-1 rounded-full bg-red-600 border-2 border-white text-white text-[11px] font-black flex items-center justify-center">{count}</span>}
       </button>
 
       {open && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex justify-end"
-          onClick={() => setOpen(false)}
-        >
-          <aside
-            className="h-full w-full max-w-xl bg-white text-slate-900 shadow-2xl overflow-y-auto"
-            onClick={(event) => event.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex justify-end" onClick={() => setOpen(false)}>
+          <aside className="h-full w-full max-w-xl bg-white text-slate-900 shadow-2xl overflow-y-auto" onClick={(event) => event.stopPropagation()}>
             <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-5 py-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-mono uppercase tracking-widest text-brand-orange font-black">
-                  HBT Online Store
-                </p>
-                <h2 className="text-xl font-black">
-                  {checkout
-                    ? "Secure Checkout"
-                    : success
-                      ? "Order Confirmed"
-                      : "Your Cart"}
-                </h2>
+                <p className="text-xs font-mono uppercase tracking-widest text-brand-orange font-black">HBT Online Store</p>
+                <h2 className="text-xl font-black">{checkout ? "Secure Checkout" : success ? "Order Confirmed" : "Your Cart"}</h2>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="p-2 rounded-xl bg-slate-100"
-                aria-label="Close store"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <button onClick={() => setOpen(false)} className="p-2 rounded-xl bg-slate-100" aria-label="Close store"><X className="w-5 h-5" /></button>
             </div>
 
             {success ? (
@@ -308,59 +284,48 @@ export default function EcommerceStore() {
                 <div className="rounded-3xl bg-emerald-50 border border-emerald-200 p-6 text-center">
                   <CheckCircle2 className="w-14 h-14 text-emerald-600 mx-auto" />
                   <h3 className="text-2xl font-black mt-3">Order placed</h3>
-                  <p className="text-sm text-slate-600 mt-1">
-                    Your order number is <strong>{success.orderId}</strong>.
-                  </p>
+                  <p className="text-sm text-slate-600 mt-1">Your order number is <strong>{success.orderId}</strong>.</p>
                 </div>
 
-                <a
-                  href={buildWhatsAppUrl(success)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-green-600 text-white py-4 font-black"
-                >
-                  <MessageSquare className="w-5 h-5" />
-                  Send Complete Order on WhatsApp
-                </a>
+                {success.paymentMethod === "bank" && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                    <div className="flex items-center gap-2 font-black"><Building2 className="w-5 h-5 text-brand-orange" /> MCB Bank Transfer</div>
+                    <p className="text-sm text-slate-700 mt-3">Please transfer the order total to the following MCB account:</p>
+                    <div className="mt-3 rounded-xl bg-white border p-4">
+                      <p className="text-xs text-slate-500">Bank</p>
+                      <p className="font-black">{MCB_BANK}</p>
+                      <p className="text-xs text-slate-500 mt-3">Account Number</p>
+                      <p className="text-lg font-black tracking-wider">{MCB_ACCOUNT}</p>
+                      <p className="text-xs text-slate-500 mt-3">Amount to transfer</p>
+                      <p className="text-lg font-black text-brand-orange">PKR {success.total.toLocaleString()}</p>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-3">After transfer, keep your payment receipt/reference. HBT will verify the payment before dispatch.</p>
+                  </div>
+                )}
+
+                <div className={`rounded-2xl p-4 ${whatsappStatus === "sent" ? "bg-emerald-50 text-emerald-700" : whatsappStatus === "failed" ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-700"}`}>
+                  <div className="flex items-center gap-2 font-bold">
+                    <MessageSquare className="w-5 h-5" />
+                    {whatsappStatus === "sending" && "Sending order to HBT WhatsApp…"}
+                    {whatsappStatus === "sent" && "Order details automatically sent to HBT WhatsApp."}
+                    {whatsappStatus === "failed" && "Automatic WhatsApp sending is not configured yet."}
+                    {whatsappStatus === "idle" && "WhatsApp notification pending…"}
+                  </div>
+                  {whatsappStatus === "failed" && (
+                    <a href={buildWhatsAppUrl(success)} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-black underline">Open WhatsApp fallback</a>
+                  )}
+                </div>
 
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="font-bold">Track your order</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Enter your HBT order or courier tracking number. Automatic courier lookup will be connected when the courier API is added.
-                  </p>
+                  <p className="text-xs text-slate-500 mt-1">Automatic courier lookup will be connected when the courier API is added.</p>
                   <div className="flex gap-2 mt-3">
-                    <input
-                      value={tracking}
-                      onChange={(event) => setTracking(event.target.value)}
-                      placeholder="Order / tracking number"
-                      className="flex-1 border rounded-xl px-3 py-2"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        alert(
-                          tracking.trim()
-                            ? `Tracking number saved for lookup: ${tracking.trim()}`
-                            : "Enter an order or tracking number first.",
-                        )
-                      }
-                      className="px-4 rounded-xl bg-slate-900 text-white font-bold"
-                      aria-label="Check tracking"
-                    >
-                      <PackageSearch className="w-4 h-4" />
-                    </button>
+                    <input value={tracking} onChange={(event) => setTracking(event.target.value)} placeholder="Order / tracking number" className="flex-1 border rounded-xl px-3 py-2" />
+                    <button type="button" onClick={() => alert(tracking.trim() ? `Tracking number saved for lookup: ${tracking.trim()}` : "Enter an order or tracking number first.")} className="px-4 rounded-xl bg-slate-900 text-white font-bold" aria-label="Check tracking"><PackageSearch className="w-4 h-4" /></button>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => {
-                    setSuccess(null);
-                    setOpen(false);
-                  }}
-                  className="w-full py-3 rounded-xl border font-bold"
-                >
-                  Continue Shopping
-                </button>
+                <button onClick={() => { setSuccess(null); setOpen(false); }} className="w-full py-3 rounded-xl border font-bold">Continue Shopping</button>
               </div>
             ) : checkout ? (
               <div className="p-5 space-y-5">
@@ -368,19 +333,7 @@ export default function EcommerceStore() {
                   <p className="font-bold mb-3">Delivery details</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {inputFields.map((key) => (
-                      <input
-                        key={key}
-                        value={form[key] || ""}
-                        onChange={(event) =>
-                          setForm({ ...form, [key]: event.target.value })
-                        }
-                        placeholder={placeholderFor(key)}
-                        className={`border rounded-xl px-3 py-3 text-sm ${
-                          key === "address" || key === "notes"
-                            ? "sm:col-span-2"
-                            : ""
-                        }`}
-                      />
+                      <input key={key} value={form[key] || ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} placeholder={placeholderFor(key)} className={`border rounded-xl px-3 py-3 text-sm ${key === "address" || key === "notes" ? "sm:col-span-2" : ""}`} />
                     ))}
                   </div>
                 </div>
@@ -388,207 +341,68 @@ export default function EcommerceStore() {
                 <div>
                   <p className="font-bold mb-3">Payment method</p>
                   <div className="grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("cod")}
-                      className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${
-                        paymentMethod === "cod"
-                          ? "border-brand-orange bg-brand-orange/5"
-                          : "border-slate-200"
-                      }`}
-                    >
-                      <Banknote className="text-brand-orange" />
-                      <span>
-                        <strong>Cash on Delivery</strong>
-                        <small className="block text-slate-500">
-                          Pay when your order arrives.
-                        </small>
-                      </span>
+                    <button type="button" onClick={() => setPaymentMethod("cod")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "cod" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
+                      <Banknote className="text-brand-orange" /><span><strong>Cash on Delivery</strong><small className="block text-slate-500">Pay when your order arrives.</small></span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("bilty")}
-                      className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${
-                        paymentMethod === "bilty"
-                          ? "border-brand-orange bg-brand-orange/5"
-                          : "border-slate-200"
-                      }`}
-                    >
-                      <Truck className="text-brand-orange" />
-                      <span>
-                        <strong>Pay on Bilty Received</strong>
-                        <small className="block text-slate-500">
-                          Payment arrangement for shipped order.
-                        </small>
-                      </span>
+                    <button type="button" onClick={() => setPaymentMethod("bilty")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "bilty" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
+                      <Truck className="text-brand-orange" /><span><strong>Pay on Bilty Received</strong><small className="block text-slate-500">Payment arrangement for shipped order.</small></span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("card")}
-                      className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${
-                        paymentMethod === "card"
-                          ? "border-brand-orange bg-brand-orange/5"
-                          : "border-slate-200"
-                      }`}
-                    >
-                      <CreditCard className="text-brand-orange" />
-                      <span>
-                        <strong>Card / Online Payment</strong>
-                        <small className="block text-slate-500">
-                          Payment gateway will be connected separately.
-                        </small>
-                      </span>
+                    <button type="button" onClick={() => setPaymentMethod("bank")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "bank" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
+                      <Building2 className="text-brand-orange" /><span><strong>MCB Bank Transfer</strong><small className="block text-slate-500">Transfer the order amount to HBT's MCB account.</small></span>
+                    </button>
+                    {paymentMethod === "bank" && (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                        <p className="font-black">MCB Bank payment details</p>
+                        <p className="text-sm mt-2">Bank: <strong>{MCB_BANK}</strong></p>
+                        <p className="text-sm">Account Number: <strong className="tracking-wide">{MCB_ACCOUNT}</strong></p>
+                        <p className="text-xs text-slate-600 mt-2">Transfer PKR {total.toLocaleString()} and keep your transaction receipt/reference for verification.</p>
+                      </div>
+                    )}
+                    <button type="button" onClick={() => setPaymentMethod("card")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "card" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
+                      <CreditCard className="text-brand-orange" /><span><strong>Card / Online Payment</strong><small className="block text-slate-500">Payment gateway will be connected separately.</small></span>
                     </button>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border p-4 space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Subtotal</span>
-                    <strong>PKR {subtotal.toLocaleString()}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Delivery (buyer pays)</span>
-                    <strong>PKR {DELIVERY_CHARGE.toLocaleString()}</strong>
-                  </div>
-                  <div className="border-t pt-2 flex justify-between text-lg">
-                    <span className="font-black">Total</span>
-                    <strong className="text-brand-orange">
-                      PKR {total.toLocaleString()}
-                    </strong>
-                  </div>
+                  <div className="flex justify-between"><span>Subtotal</span><strong>PKR {subtotal.toLocaleString()}</strong></div>
+                  <div className="flex justify-between"><span>Delivery (buyer pays)</span><strong>PKR {DELIVERY_CHARGE.toLocaleString()}</strong></div>
+                  <div className="border-t pt-2 flex justify-between text-lg"><span className="font-black">Total</span><strong className="text-brand-orange">PKR {total.toLocaleString()}</strong></div>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={
-                    submitting ||
-                    !form.name.trim() ||
-                    !form.phone.trim() ||
-                    !form.whatsapp.trim() ||
-                    !form.city.trim() ||
-                    !form.address.trim()
-                  }
-                  onClick={placeOrder}
-                  className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black disabled:opacity-40"
-                >
-                  {submitting
-                    ? "Placing Order…"
-                    : `Place Order • PKR ${total.toLocaleString()}`}
+                <button type="button" disabled={submitting || !form.name.trim() || !form.phone.trim() || !form.whatsapp.trim() || !form.city.trim() || !form.address.trim()} onClick={placeOrder} className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black disabled:opacity-40">
+                  {submitting ? "Placing Order…" : `Place Order • PKR ${total.toLocaleString()}`}
                 </button>
-
-                <p className="text-[11px] text-slate-500 text-center">
-                  After placing the order, you can send the complete order details directly to HBT WhatsApp.
-                </p>
+                <p className="text-[11px] text-slate-500 text-center">Your order is saved securely. For MCB transfer, payment is verified before dispatch.</p>
               </div>
             ) : (
               <div className="p-5 space-y-4">
                 {!cart.length ? (
-                  <div className="py-16 text-center text-slate-500">
-                    <ShoppingCart className="w-12 h-12 mx-auto opacity-30" />
-                    <p className="font-bold mt-3">Your cart is empty</p>
-                    <p className="text-xs mt-1">
-                      Add tyres from the catalogue to start shopping.
-                    </p>
-                  </div>
+                  <div className="py-16 text-center text-slate-500"><ShoppingCart className="w-12 h-12 mx-auto opacity-30" /><p className="font-bold mt-3">Your cart is empty</p><p className="text-xs mt-1">Add tyres from the catalogue to start shopping.</p></div>
                 ) : (
                   <>
                     {cart.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex gap-3 border rounded-2xl p-3"
-                      >
-                        {item.image ? (
-                          <img
-                            src={item.image}
-                            className="w-20 h-20 rounded-xl object-cover bg-slate-100"
-                            alt=""
-                          />
-                        ) : (
-                          <div className="w-20 h-20 rounded-xl bg-slate-100" />
-                        )}
+                      <div key={item.id} className="flex gap-3 border rounded-2xl p-3">
+                        {item.image ? <img src={item.image} className="w-20 h-20 rounded-xl object-cover bg-slate-100" alt="" /> : <div className="w-20 h-20 rounded-xl bg-slate-100" />}
                         <div className="flex-1 min-w-0">
-                          <p className="font-black text-sm truncate">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {item.brand} • {item.size}
-                          </p>
-                          <p className="text-brand-orange font-black mt-1">
-                            PKR {Number(item.price).toLocaleString()}
-                          </p>
+                          <p className="font-black text-sm truncate">{item.name}</p>
+                          <p className="text-xs text-slate-500">{item.brand} • {item.size}</p>
+                          <p className="text-brand-orange font-black mt-1">PKR {Number(item.price).toLocaleString()}</p>
                           <div className="flex items-center gap-2 mt-2">
-                            <button
-                              type="button"
-                              onClick={() => changeQty(item.id, -1)}
-                              className="p-1.5 rounded-lg bg-slate-100"
-                              aria-label="Decrease quantity"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="text-xs font-black">
-                              {item.quantity}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => changeQty(item.id, 1)}
-                              className="p-1.5 rounded-lg bg-slate-100"
-                              aria-label="Increase quantity"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeItem(item.id)}
-                              className="ml-auto p-1.5 rounded-lg bg-red-50 text-red-600"
-                              aria-label="Remove item"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                            <button type="button" onClick={() => changeQty(item.id, -1)} className="p-1.5 rounded-lg bg-slate-100" aria-label="Decrease quantity"><Minus className="w-3 h-3" /></button>
+                            <span className="text-xs font-black">{item.quantity}</span>
+                            <button type="button" onClick={() => changeQty(item.id, 1)} className="p-1.5 rounded-lg bg-slate-100" aria-label="Increase quantity"><Plus className="w-3 h-3" /></button>
+                            <button type="button" onClick={() => removeItem(item.id)} className="ml-auto p-1.5 rounded-lg bg-red-50 text-red-600" aria-label="Remove item"><Trash2 className="w-3 h-3" /></button>
                           </div>
                         </div>
                       </div>
                     ))}
-
                     <div className="border-t pt-4 space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Subtotal</span>
-                        <strong>PKR {subtotal.toLocaleString()}</strong>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Delivery</span>
-                        <strong>
-                          PKR {DELIVERY_CHARGE.toLocaleString()}
-                        </strong>
-                      </div>
-                      <div className="flex justify-between text-xl font-black">
-                        <span>Total</span>
-                        <strong className="text-brand-orange">
-                          PKR {total.toLocaleString()}
-                        </strong>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setCheckout(true)}
-                        className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black mt-3"
-                      >
-                        Buy Now / Checkout
-                      </button>
-
-                      <a
-                        href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-                          "Hello HBT, I need help with my online cart.",
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-600 text-white font-bold"
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                        Ask on WhatsApp
-                      </a>
+                      <div className="flex justify-between text-sm"><span>Subtotal</span><strong>PKR {subtotal.toLocaleString()}</strong></div>
+                      <div className="flex justify-between text-sm"><span>Delivery</span><strong>PKR {DELIVERY_CHARGE.toLocaleString()}</strong></div>
+                      <div className="flex justify-between text-xl font-black"><span>Total</span><strong className="text-brand-orange">PKR {total.toLocaleString()}</strong></div>
+                      <button type="button" onClick={() => setCheckout(true)} className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black mt-3">Buy Now / Checkout</button>
+                      <a href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent("Hello HBT, I need help with my online cart.")}`} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-green-600 text-white font-bold"><MessageSquare className="w-4 h-4" />Ask on WhatsApp</a>
                     </div>
                   </>
                 )}
