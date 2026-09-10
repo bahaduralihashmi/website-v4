@@ -12,7 +12,11 @@ import {
   MessageSquare,
   PackageSearch,
   Building2,
+  Upload,
+  ShieldCheck,
+  Loader2,
 } from "lucide-react";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import type { TireProduct } from "../data";
 import {
   createOrder,
@@ -21,12 +25,14 @@ import {
   type CustomerDetails,
   type PaymentMethod,
 } from "../lib/orderService";
+import { storage } from "../lib/firebase";
 
 const CART_KEY = "hbt-cart-v1";
 const DELIVERY_CHARGE = 500;
 const WHATSAPP_NUMBER = "923034572298";
 const MCB_ACCOUNT = "1581298881001800";
 const MCB_BANK = "MCB Bank";
+const MAX_RECEIPT_SIZE = 5 * 1024 * 1024;
 
 type StoreEventDetail = { tire: TireProduct };
 type OrderSnapshot = {
@@ -37,6 +43,7 @@ type OrderSnapshot = {
   subtotal: number;
   deliveryCharge: number;
   paymentMethod: PaymentMethod;
+  paymentReceiptUrl?: string | null;
 };
 
 function readCart(): CartItem[] {
@@ -67,8 +74,9 @@ export default function EcommerceStore() {
   const [success, setSuccess] = useState<OrderSnapshot | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptError, setReceiptError] = useState("");
   const [tracking, setTracking] = useState("");
-  const [whatsappStatus, setWhatsappStatus] = useState<"idle" | "sending" | "sent" | "failed">("idle");
   const [form, setForm] = useState<CustomerDetails>({
     name: "",
     phone: "",
@@ -91,9 +99,7 @@ export default function EcommerceStore() {
       const found = existing.find((item) => item.id === tire.id);
       const next = found
         ? existing.map((item) =>
-            item.id === tire.id
-              ? { ...item, quantity: Math.min(item.quantity + 1, stock) }
-              : item,
+            item.id === tire.id ? { ...item, quantity: Math.min(item.quantity + 1, stock) } : item,
           )
         : [
             ...existing,
@@ -141,55 +147,34 @@ export default function EcommerceStore() {
     setCart(next);
   };
 
-  const buildWhatsAppMessage = (order: OrderSnapshot) => {
-    const lines = order.items.map(
-      (item) =>
-        `• ${item.brand} ${item.name} | ${item.size} × ${item.quantity} = PKR ${(Number(item.price) * item.quantity).toLocaleString()}`,
-    );
-    return [
-      "🛒 NEW HBT ONLINE ORDER",
-      `Order: ${order.orderId}`,
-      `Customer: ${order.customer.name}`,
-      `Phone: ${order.customer.phone}`,
-      `WhatsApp: ${order.customer.whatsapp}`,
-      `City: ${order.customer.city}`,
-      `Address: ${order.customer.address}`,
-      order.customer.landmark ? `Landmark: ${order.customer.landmark}` : "",
-      "",
-      "PRODUCTS:",
-      ...lines,
-      "",
-      `Subtotal: PKR ${order.subtotal.toLocaleString()}`,
-      `Delivery: PKR ${order.deliveryCharge.toLocaleString()} (paid by buyer)`,
-      `TOTAL: PKR ${order.total.toLocaleString()}`,
-      `Payment: ${paymentLabel(order.paymentMethod)}`,
-      `Payment status: Pending`,
-      order.paymentMethod === "bank" ? `MCB Account: ${MCB_ACCOUNT}` : "",
-      order.customer.notes ? `Notes: ${order.customer.notes}` : "",
-    ].filter(Boolean).join("\n");
+  const handleReceipt = (file: File | null) => {
+    setReceiptError("");
+    if (!file) {
+      setReceiptFile(null);
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setReceiptFile(null);
+      setReceiptError("Please upload a payment receipt image (JPG, PNG or WebP).");
+      return;
+    }
+    if (file.size > MAX_RECEIPT_SIZE) {
+      setReceiptFile(null);
+      setReceiptError("Receipt image must be 5 MB or smaller.");
+      return;
+    }
+    setReceiptFile(file);
   };
 
-  const buildWhatsAppUrl = (order: OrderSnapshot) =>
-    `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildWhatsAppMessage(order))}`;
-
-  const sendOrderToWhatsApp = async (order: OrderSnapshot) => {
-    setWhatsappStatus("sending");
-    try {
-      const response = await fetch("/api/whatsapp-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order,
-          message: buildWhatsAppMessage(order),
-          recipient: WHATSAPP_NUMBER,
-        }),
-      });
-      if (!response.ok) throw new Error(`WhatsApp API returned ${response.status}`);
-      setWhatsappStatus("sent");
-    } catch (error) {
-      console.error("Automatic WhatsApp notification failed", error);
-      setWhatsappStatus("failed");
-    }
+  const uploadReceipt = async (orderId: string) => {
+    if (!receiptFile) return null;
+    const safeName = receiptFile.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120);
+    const receiptRef = ref(storage, `payment-receipts/${orderId}/${Date.now()}-${safeName}`);
+    const snapshot = await uploadBytes(receiptRef, receiptFile, {
+      contentType: receiptFile.type,
+      customMetadata: { orderId, purpose: "mcb-payment-receipt" },
+    });
+    return getDownloadURL(snapshot.ref);
   };
 
   const placeOrder = async () => {
@@ -202,20 +187,35 @@ export default function EcommerceStore() {
       !cart.length
     ) return;
 
+    if (paymentMethod === "bank" && !receiptFile) {
+      setReceiptError("Please upload your MCB payment receipt before placing the order.");
+      return;
+    }
+
+    if (paymentMethod === "card") {
+      alert("MCB eGate card checkout is not activated yet. Please use MCB Bank Transfer, COD, or Bilty until the MCB merchant gateway credentials are configured.");
+      return;
+    }
+
     setSubmitting(true);
-    setWhatsappStatus("idle");
+    setReceiptError("");
     const orderId = generateOrderId();
-    const snapshot: OrderSnapshot = {
-      orderId,
-      total,
-      items: cart,
-      customer: form,
-      subtotal,
-      deliveryCharge: DELIVERY_CHARGE,
-      paymentMethod,
-    };
 
     try {
+      const paymentReceiptUrl = paymentMethod === "bank" ? await uploadReceipt(orderId) : null;
+      const paymentStatus = paymentMethod === "bank" ? "pending_verification" : "pending";
+
+      const snapshot: OrderSnapshot = {
+        orderId,
+        total,
+        items: cart,
+        customer: form,
+        subtotal,
+        deliveryCharge: DELIVERY_CHARGE,
+        paymentMethod,
+        paymentReceiptUrl,
+      };
+
       await createOrder({
         orderId,
         customer: form,
@@ -224,22 +224,24 @@ export default function EcommerceStore() {
         deliveryCharge: DELIVERY_CHARGE,
         total,
         paymentMethod,
-        paymentStatus: "pending",
+        paymentStatus,
         orderStatus: "new",
         courier: "pending",
         trackingNumber: null,
+        paymentReceiptUrl,
       });
+
       localStorage.setItem("hbt-last-order", JSON.stringify(snapshot));
       saveCart([]);
       setCart([]);
+      setReceiptFile(null);
       setCheckout(false);
       setSuccess(snapshot);
       setOpen(true);
       setTracking("");
-      void sendOrderToWhatsApp(snapshot);
     } catch (error) {
       console.error("Order creation failed", error);
-      alert("We could not save your order. Please try again or contact HBT on WhatsApp.");
+      setReceiptError("We could not complete the order. Please check your connection and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -285,46 +287,30 @@ export default function EcommerceStore() {
                   <CheckCircle2 className="w-14 h-14 text-emerald-600 mx-auto" />
                   <h3 className="text-2xl font-black mt-3">Order placed</h3>
                   <p className="text-sm text-slate-600 mt-1">Your order number is <strong>{success.orderId}</strong>.</p>
+                  {success.paymentMethod === "bank" && <p className="text-sm text-amber-700 mt-2 font-semibold">Payment receipt received. HBT will verify the transfer before dispatch.</p>}
                 </div>
 
                 {success.paymentMethod === "bank" && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
                     <div className="flex items-center gap-2 font-black"><Building2 className="w-5 h-5 text-brand-orange" /> MCB Bank Transfer</div>
-                    <p className="text-sm text-slate-700 mt-3">Please transfer the order total to the following MCB account:</p>
-                    <div className="mt-3 rounded-xl bg-white border p-4">
-                      <p className="text-xs text-slate-500">Bank</p>
-                      <p className="font-black">{MCB_BANK}</p>
-                      <p className="text-xs text-slate-500 mt-3">Account Number</p>
-                      <p className="text-lg font-black tracking-wider">{MCB_ACCOUNT}</p>
-                      <p className="text-xs text-slate-500 mt-3">Amount to transfer</p>
-                      <p className="text-lg font-black text-brand-orange">PKR {success.total.toLocaleString()}</p>
+                    <div className="mt-3 rounded-xl bg-white border p-4 space-y-3">
+                      <div><p className="text-xs text-slate-500">Bank</p><p className="font-black">{MCB_BANK}</p></div>
+                      <div><p className="text-xs text-slate-500">Account Number</p><p className="text-lg font-black tracking-wider">{MCB_ACCOUNT}</p></div>
+                      <div><p className="text-xs text-slate-500">Transferred amount</p><p className="text-lg font-black text-brand-orange">PKR {success.total.toLocaleString()}</p></div>
                     </div>
-                    <p className="text-xs text-slate-600 mt-3">After transfer, keep your payment receipt/reference. HBT will verify the payment before dispatch.</p>
                   </div>
                 )}
 
-                <div className={`rounded-2xl p-4 ${whatsappStatus === "sent" ? "bg-emerald-50 text-emerald-700" : whatsappStatus === "failed" ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-700"}`}>
-                  <div className="flex items-center gap-2 font-bold">
-                    <MessageSquare className="w-5 h-5" />
-                    {whatsappStatus === "sending" && "Sending order to HBT WhatsApp…"}
-                    {whatsappStatus === "sent" && "Order details automatically sent to HBT WhatsApp."}
-                    {whatsappStatus === "failed" && "Automatic WhatsApp sending is not configured yet."}
-                    {whatsappStatus === "idle" && "WhatsApp notification pending…"}
-                  </div>
-                  {whatsappStatus === "failed" && (
-                    <a href={buildWhatsAppUrl(success)} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm font-black underline">Open WhatsApp fallback</a>
-                  )}
-                </div>
-
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="font-bold">Track your order</p>
-                  <p className="text-xs text-slate-500 mt-1">Automatic courier lookup will be connected when the courier API is added.</p>
+                  <p className="text-xs text-slate-500 mt-1">Courier tracking will become available when a tracking number is assigned.</p>
                   <div className="flex gap-2 mt-3">
                     <input value={tracking} onChange={(event) => setTracking(event.target.value)} placeholder="Order / tracking number" className="flex-1 border rounded-xl px-3 py-2" />
                     <button type="button" onClick={() => alert(tracking.trim() ? `Tracking number saved for lookup: ${tracking.trim()}` : "Enter an order or tracking number first.")} className="px-4 rounded-xl bg-slate-900 text-white font-bold" aria-label="Check tracking"><PackageSearch className="w-4 h-4" /></button>
                   </div>
                 </div>
 
+                <a href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hello HBT, I need help with order ${success.orderId}.`)}`} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600 text-white font-bold"><MessageSquare className="w-4 h-4" />Customer Support on WhatsApp</a>
                 <button onClick={() => { setSuccess(null); setOpen(false); }} className="w-full py-3 rounded-xl border font-bold">Continue Shopping</button>
               </div>
             ) : checkout ? (
@@ -348,19 +334,39 @@ export default function EcommerceStore() {
                       <Truck className="text-brand-orange" /><span><strong>Pay on Bilty Received</strong><small className="block text-slate-500">Payment arrangement for shipped order.</small></span>
                     </button>
                     <button type="button" onClick={() => setPaymentMethod("bank")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "bank" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
-                      <Building2 className="text-brand-orange" /><span><strong>MCB Bank Transfer</strong><small className="block text-slate-500">Transfer the order amount to HBT's MCB account.</small></span>
+                      <Building2 className="text-brand-orange" /><span><strong>MCB Bank Transfer</strong><small className="block text-slate-500">Transfer the exact order total and upload your receipt.</small></span>
                     </button>
+
                     {paymentMethod === "bank" && (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                        <p className="font-black">MCB Bank payment details</p>
-                        <p className="text-sm mt-2">Bank: <strong>{MCB_BANK}</strong></p>
-                        <p className="text-sm">Account Number: <strong className="tracking-wide">{MCB_ACCOUNT}</strong></p>
-                        <p className="text-xs text-slate-600 mt-2">Transfer PKR {total.toLocaleString()} and keep your transaction receipt/reference for verification.</p>
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-4">
+                        <div>
+                          <p className="font-black">MCB payment details</p>
+                          <p className="text-sm mt-2">Bank: <strong>{MCB_BANK}</strong></p>
+                          <p className="text-sm">Account Number: <strong className="tracking-wide">{MCB_ACCOUNT}</strong></p>
+                          <p className="text-sm mt-2">Amount to transfer: <strong className="text-brand-orange">PKR {total.toLocaleString()}</strong></p>
+                        </div>
+                        <div className="rounded-xl bg-white border p-4">
+                          <label className="flex items-center gap-2 font-bold text-sm cursor-pointer">
+                            <Upload className="w-4 h-4 text-brand-orange" /> Upload payment receipt
+                            <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => handleReceipt(event.target.files?.[0] || null)} />
+                          </label>
+                          <p className="text-xs text-slate-500 mt-2">Upload the receipt/screenshot from your banking app. Maximum 5 MB.</p>
+                          {receiptFile && <p className="text-xs font-semibold text-emerald-700 mt-2">✓ {receiptFile.name}</p>}
+                          {receiptError && <p className="text-xs font-semibold text-red-600 mt-2">{receiptError}</p>}
+                        </div>
+                        <p className="text-[11px] text-slate-600">Your receipt is stored with the order for payment verification. Do not upload passwords, OTPs, PINs or card details.</p>
                       </div>
                     )}
+
                     <button type="button" onClick={() => setPaymentMethod("card")} className={`p-4 rounded-2xl border text-left flex gap-3 items-center ${paymentMethod === "card" ? "border-brand-orange bg-brand-orange/5" : "border-slate-200"}`}>
-                      <CreditCard className="text-brand-orange" /><span><strong>Card / Online Payment</strong><small className="block text-slate-500">Payment gateway will be connected separately.</small></span>
+                      <CreditCard className="text-brand-orange" /><span><strong>Card / Online Payment</strong><small className="block text-slate-500">Secure MCB eGate checkout — card details are entered on the payment gateway.</small></span>
                     </button>
+
+                    {paymentMethod === "card" && (
+                      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                        <div className="flex gap-2 items-start"><ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" /><div><p className="font-black">Secure card payment</p><p className="text-xs text-slate-600 mt-1">HBT will never store your card number, CVV, expiry date or OTP. The actual MCB eGate merchant integration must be activated before card payments can be accepted.</p></div></div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -370,10 +376,10 @@ export default function EcommerceStore() {
                   <div className="border-t pt-2 flex justify-between text-lg"><span className="font-black">Total</span><strong className="text-brand-orange">PKR {total.toLocaleString()}</strong></div>
                 </div>
 
-                <button type="button" disabled={submitting || !form.name.trim() || !form.phone.trim() || !form.whatsapp.trim() || !form.city.trim() || !form.address.trim()} onClick={placeOrder} className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black disabled:opacity-40">
-                  {submitting ? "Placing Order…" : `Place Order • PKR ${total.toLocaleString()}`}
+                <button type="button" disabled={submitting || paymentMethod === "card" || !form.name.trim() || !form.phone.trim() || !form.whatsapp.trim() || !form.city.trim() || !form.address.trim()} onClick={placeOrder} className="w-full py-4 rounded-2xl bg-brand-orange text-white font-black disabled:opacity-40">
+                  {submitting ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Processing…</span> : paymentMethod === "bank" ? `Submit Bank Payment • PKR ${total.toLocaleString()}` : `Place Order • PKR ${total.toLocaleString()}`}
                 </button>
-                <p className="text-[11px] text-slate-500 text-center">Your order is saved securely. For MCB transfer, payment is verified before dispatch.</p>
+                <p className="text-[11px] text-slate-500 text-center">Delivery charge is paid by the buyer. MCB transfer orders are verified before dispatch.</p>
               </div>
             ) : (
               <div className="p-5 space-y-4">
