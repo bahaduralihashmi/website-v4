@@ -2,6 +2,7 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 export type PaymentMethod = "cod" | "bilty" | "bank" | "card";
+export type PaymentStatus = "pending" | "pending_verification" | "paid" | "failed";
 
 export interface CartItem {
   id: string;
@@ -32,10 +33,11 @@ export interface OrderPayload {
   deliveryCharge: number;
   total: number;
   paymentMethod: PaymentMethod;
-  paymentStatus: "pending" | "paid";
+  paymentStatus: PaymentStatus;
   orderStatus: "new";
   courier: "pending";
   trackingNumber: null;
+  paymentReceiptUrl?: string | null;
 }
 
 export async function createOrder(payload: OrderPayload): Promise<string> {
