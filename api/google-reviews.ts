@@ -1,18 +1,19 @@
 type VercelRequest = any;
 type VercelResponse = any;
 
+const DEFAULT_PLACE_ID = "ChIJL0avNwADGTkR1nF8MiXCecQ";
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  const placeId = process.env.GOOGLE_PLACE_ID;
+  const placeId = process.env.GOOGLE_PLACE_ID || DEFAULT_PLACE_ID;
 
-  if (!apiKey || !placeId) {
+  if (!apiKey) {
     return res.status(503).json({
-      error: "Google reviews are not configured yet.",
+      error: "Google Places API key is not configured.",
       configured: false,
+      placeId,
     });
   }
 
@@ -39,11 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       source: "google",
       name: review.authorAttribution?.displayName || "Google user",
       initials: (review.authorAttribution?.displayName || "G")
-        .split(/\s+/)
-        .map((part: string) => part[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase(),
+        .split(/\s+/).map((part: string) => part[0]).join("").slice(0, 2).toUpperCase(),
       rating: Number(review.rating || 5),
       text: review.text?.text || review.originalText?.text || "",
       date: review.relativePublishTimeDescription || "Google review",
