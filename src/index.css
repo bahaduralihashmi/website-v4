@@ -43,6 +43,7 @@ img, svg, video { max-width: 100%; }
   h1 { line-height: 1.08; }
   h2, h3 { line-height: 1.15; }
   .mobile-safe-x { padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+  body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
