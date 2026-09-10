@@ -10,7 +10,6 @@ service cloud.firestore {
     }
 
     function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
 
     function isValidTireProduct(data) {
       return data.keys().hasAll(['id', 'name', 'brand', 'size', 'feature', 'price', 'badge', 'segment', 'image', 'description'])
@@ -79,13 +78,13 @@ service cloud.firestore {
           && (data.subtotal is int || data.subtotal is float) && data.subtotal >= 0
           && (data.deliveryCharge is int || data.deliveryCharge is float) && data.deliveryCharge >= 0
           && (data.total is int || data.total is float) && data.total == data.subtotal + data.deliveryCharge
-          && data.paymentMethod is string && (data.paymentMethod == 'cod' || data.paymentMethod == 'bilty' || data.paymentMethod == 'card')
+          && data.paymentMethod is string && (data.paymentMethod == 'cod' || data.paymentMethod == 'bilty' || data.paymentMethod == 'bank' || data.paymentMethod == 'card')
           && data.paymentStatus == 'pending'
           && data.orderStatus == 'new'
           && data.courier == 'pending'
           && data.trackingNumber == null
-          && data.createdAt is timestamp && data.createdAt == request.time
-          && data.updatedAt is timestamp && data.updatedAt == request.time;
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp;
     }
 
     match /products/{productId} {
@@ -121,8 +120,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Public checkout creation. Orders are append-only from the storefront;
-    // only authenticated admins should later update them from the admin panel.
     match /orders/{orderDocId} {
       allow create: if isValidId(orderDocId) && isValidOrder(incoming());
       allow read: if request.auth != null;
