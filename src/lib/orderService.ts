@@ -1,7 +1,7 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
-export type PaymentMethod = "cod" | "bilty" | "card";
+export type PaymentMethod = "cod" | "bilty" | "bank" | "card";
 
 export interface CartItem {
   id: string;
