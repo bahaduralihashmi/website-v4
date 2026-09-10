@@ -67,6 +67,7 @@ service cloud.firestore {
 
     function isValidOrder(data) {
       return data.keys().hasAll(['orderId', 'customer', 'items', 'subtotal', 'deliveryCharge', 'total', 'paymentMethod', 'paymentStatus', 'orderStatus', 'courier', 'trackingNumber', 'createdAt', 'updatedAt'])
+          && data.keys().size() >= 13 && data.keys().size() <= 14
           && data.orderId is string && data.orderId.size() <= 64 && data.orderId.matches('^HBT-[0-9]{4}-[0-9]{4}$')
           && data.customer is map
           && data.customer.name is string && data.customer.name.size() >= 2 && data.customer.name.size() <= 120
@@ -79,12 +80,13 @@ service cloud.firestore {
           && (data.deliveryCharge is int || data.deliveryCharge is float) && data.deliveryCharge >= 0
           && (data.total is int || data.total is float) && data.total == data.subtotal + data.deliveryCharge
           && data.paymentMethod is string && (data.paymentMethod == 'cod' || data.paymentMethod == 'bilty' || data.paymentMethod == 'bank' || data.paymentMethod == 'card')
-          && data.paymentStatus == 'pending'
+          && data.paymentStatus is string && (data.paymentStatus == 'pending' || data.paymentStatus == 'pending_verification')
           && data.orderStatus == 'new'
           && data.courier == 'pending'
           && data.trackingNumber == null
           && data.createdAt is timestamp
-          && data.updatedAt is timestamp;
+          && data.updatedAt is timestamp
+          && (!data.keys().hasAny(['paymentReceiptUrl']) || (data.paymentReceiptUrl is string && data.paymentReceiptUrl.size() <= 2048));
     }
 
     match /products/{productId} {
